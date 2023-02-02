@@ -1,0 +1,154 @@
+!pip install gensim
+!pip install pyldavis
+# !pip install --upgrade pandas
+
+import numpy as np
+import pandas as pd
+
+import sklearn
+import matplotlib.pyplot as plt
+from gensim import matutils, models
+
+import nltk
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+nltk.download('omw-1.4')
+
+from bs4 import BeautifulSoup
+import re
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.stem.snowball import SnowballStemmer
+from nltk.stem import WordNetLemmatizer
+
+import gensim.models as models
+from gensim.corpora import Dictionary
+
+from sklearn.model_selection import train_test_split
+
+
+alpha_num_pattern = r'[^a-zA-Z0-9\s]'
+stop_words = set(stopwords.words('english'))
+ps = PorterStemmer()
+ss = SnowballStemmer('english')
+lem = WordNetLemmatizer()
+seed = 42
+
+def read_data(filename):
+
+    df = pd.read_csv(filename)
+
+    txt_data = df["review"]
+
+    drug_names = df["drugName"] 
+
+    return txt_data, drug_names
+
+def data_clean(sent):
+
+    # due to presence of some characters like &#039
+    output = BeautifulSoup(sent, 'html.parser').get_text()
+
+    # keep only letters and numbers. later we can skip the numnbers
+    output = re.sub(alpha_num_pattern, "", output)
+
+    # lowercase all the 
+    output = output.lower()
+
+    return output
+
+
+
+
+txt_data, drug_names = read_data("drugsComTrain_raw.csv")
+
+txt_data = txt_data.apply(data_clean)
+txt_data = txt_data.apply(data_process)
+
+def data_process(sent):
+    
+    # tokenize the words
+    output = nltk.tokenize.word_tokenize(sent)
+
+    # remove the stop words
+    output = [word for word in output if word not in stop_words]
+
+    # lemmatize the output
+    output = [lem.lemmatize(word) for word in output]
+
+    return output
+
+def doc_create_dict(sent):
+
+  # create a dictionary of words from the data
+    dictionary = Dictionary(sent)
+
+    # remove the words that occur extremely rarely or commonly
+    dictionary.filter_extremes(no_below=10, no_above=0.75)
+
+    return dictionary
+
+def doc_create_bow(dictionary, sent):
+
+    bow_corpus = [dictionary.doc2bow(s) for s in sent]
+
+    return bow_corpus
+
+def doc_create_tfidf(corpus):
+
+  # create the tfidf model
+  txt_tfidf = models.TfidfModel(corpus)
+
+  # convert each bow vector to tf-idf vector
+  tfidf_corpus = [txt_tfidf[x] for x in corpus]
+
+  return tfidf_corpus
+
+print(txt_data)
+
+txt_dict = doc_create_dict(txt_data)
+
+bow_corpus = doc_create_bow(txt_dict, txt_data)
+
+tfidf_corpus = doc_create_tfidf(bow_corpus)
+
+
+
+def lda_model(dictionary, corpus, num_topics=8, alpha="auto", eta="auto"):
+
+    chunksize = 2000
+    passes = 1
+    iterations = 400
+    eval_every = None
+
+    temp = dictionary[0]
+    id2word = dictionary.id2token
+
+    model = models.LdaModel(
+        corpus=corpus,
+        id2word=id2word,
+        chunksize=chunksize,
+        alpha=alpha,
+        eta=eta,
+        iterations=iterations,
+        num_topics=num_topics,
+        passes=passes,
+        random_state=42,
+        eval_every=eval_every
+    )
+
+    return model
+
+def lsa_model(dictionary, corpus, num_topics=8):
+
+  model = models.LsiModel(corpus, 
+                          id2word=dictionary, 
+                          num_topics=num_topics)
+
+  return model
+
+
+def get_perplexity_val(model, corpus):
+
+  return model.log_perplexity(corpus)
